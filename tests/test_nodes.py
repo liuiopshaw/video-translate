@@ -8,6 +8,7 @@ from nodes.extract_audio import extract_audio
 from nodes.asr import run_asr
 from nodes.translate import translate
 from nodes.tts import run_tts
+from nodes.synthesis import synthesize_audio
 
 
 class TestExtractAudio:
@@ -274,3 +275,65 @@ class TestTts:
             assert "--rate" in call_args
             rate_idx = call_args.index("--rate")
             assert "-15%" in call_args[rate_idx + 1]
+
+
+class TestSynthesis:
+    def test_synthesize_mixes_bgm_with_tts(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["audio_wav"] = "/tmp/audio.wav"
+        state["tts_segments"] = [
+            {"index": 0, "start": 0.0, "end": 2.0, "wav_path": "/tmp/tts/0000.wav"},
+        ]
+        state["cn_audio"] = "/tmp/cn_audio.wav"
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+            result = synthesize_audio(state)
+
+            assert "cn_audio_mixed" in result
+            assert result["stage"] == "merge"
+
+    def test_synthesize_no_bgm_flag_skips_separation(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4", keep_bgm=False)
+        state["audio_wav"] = "/tmp/audio.wav"
+        state["tts_segments"] = [
+            {"index": 0, "start": 0.0, "end": 2.0, "wav_path": "/tmp/tts/0000.wav"},
+        ]
+        state["cn_audio"] = "/tmp/cn_audio.wav"
+
+        result = synthesize_audio(state)
+
+        assert result["bgm_audio"] == ""
+        assert result["cn_audio_mixed"] == state["cn_audio"]
+
+    def test_synthesize_uvr_failure_degrades_gracefully(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["audio_wav"] = "/tmp/audio.wav"
+        state["tts_segments"] = [
+            {"index": 0, "start": 0.0, "end": 2.0, "wav_path": "/tmp/tts/0000.wav"},
+        ]
+        state["cn_audio"] = "/tmp/cn_audio.wav"
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = [
+                MagicMock(returncode=1, stderr="UVR error"),
+                MagicMock(returncode=0),
+            ]
+            result = synthesize_audio(state)
+
+            assert "cn_audio_mixed" in result
+            assert result["errors"][0]["stage"] == "synthesis"
+
+    def test_synthesize_skips_if_already_done(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["tts_segments"] = [{"index": 0, "start": 0.0, "end": 1.0, "wav_path": "/tmp/0.wav"}]
+        state["cn_audio_mixed"] = "/tmp/already_mixed.wav"
+
+        result = synthesize_audio(state)
+        assert result == {"stage": "merge"}
+
+    def test_synthesize_no_tts_segments_returns_error(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+
+        result = synthesize_audio(state)
+        assert len(result["errors"]) == 1
