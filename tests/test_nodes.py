@@ -88,26 +88,18 @@ class TestAsr:
         state = make_initial_state(input_path="/tmp/lecture.mp4")
         state["audio_wav"] = "/tmp/audio.wav"
 
-        mock_whisperx = MagicMock()
-        with patch.dict(sys.modules, {"whisperx": mock_whisperx}):
+        mock_whisper = MagicMock()
+        with patch.dict(sys.modules, {"whisper": mock_whisper}):
             with patch("os.path.exists", return_value=True), \
-                 patch("whisperx.load_model") as mock_model, \
-                 patch("whisperx.load_audio") as mock_load:
+                 patch("whisper.load_model") as mock_model:
 
                 mock_segments = [
                     {"start": 0.0, "end": 2.5, "text": "Hello world"},
                     {"start": 2.5, "end": 5.0, "text": "Welcome to the lecture"},
                 ]
                 mock_model.return_value.transcribe.return_value = {"segments": mock_segments}
-                mock_load.return_value = None
 
-                # Mock the alignment step
-                with patch("whisperx.load_align_model") as mock_align_model, \
-                     patch("whisperx.align") as mock_align:
-                    mock_align_model.return_value = (MagicMock(), {})
-                    mock_align.return_value = {"segments": mock_segments}
-
-                    result = run_asr(state)
+                result = run_asr(state)
 
         assert len(result["subtitles_en"]) == 2
         assert result["subtitles_en"][0]["text"] == "Hello world"

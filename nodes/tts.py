@@ -120,23 +120,25 @@ def run_tts(state: PipelineState) -> dict:
     }
 
 
-def _concat_wavs(wav_paths: list[str], output_path: str) -> None:
-    """Concatenate WAV files using ffmpeg concat demuxer."""
-    concat_list = output_path + ".txt"
-    with open(concat_list, "w") as f:
-        for p in wav_paths:
-            f.write(f"file '{p}'\n")
+def _concat_wavs(paths: list[str], output_path: str) -> None:
+    """Concatenate audio files using ffmpeg concat filter (handles mixed codecs).
+
+    Uses the concat filter instead of the demuxer because Edge TTS outputs
+    MP3-encoded data in files that may carry unexpected extensions.
+    """
+    # Build filter: [0][1][2]...concat=n=N:v=0:a=1[out]
+    inputs = []
+    for p in paths:
+        inputs += ["-i", p]
+    n = len(paths)
+    filter_expr = "".join(f"[{i}:a]" for i in range(n)) + f"concat=n={n}:v=0:a=1[out]"
 
     result = subprocess.run(
-        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list,
-         "-c", "copy", output_path],
+        ["ffmpeg", "-y"] + inputs +
+        ["-filter_complex", filter_expr,
+         "-map", "[out]", output_path],
         capture_output=True, text=True,
     )
-
-    try:
-        os.remove(concat_list)
-    except OSError:
-        pass
 
     if result.returncode != 0:
         raise RuntimeError(f"ffmpeg concat failed: {result.stderr[:200]}")

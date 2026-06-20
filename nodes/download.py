@@ -26,20 +26,23 @@ def download_video(state: PipelineState) -> dict:
     os.makedirs(download_dir, exist_ok=True)
 
     try:
-        # Detect Node.js path for YouTube JavaScript extraction
+        # Build yt-dlp command with JavaScript runtimes
+        cmd = [
+            "yt-dlp",
+            "--no-playlist",
+            "--restrict-filenames",
+            "--output", os.path.join(download_dir, "%(title)s.%(ext)s"),
+            "--print", "title",
+        ]
+        # Use multiple --js-runtimes flags (comma syntax was removed in newer yt-dlp)
         node_path = _find_node()
-        js_runtime = f"node:{node_path},deno" if node_path else "node,deno"
+        if node_path:
+            cmd += ["--js-runtimes", f"node:{node_path}"]
+        # Always include deno as fallback
+        cmd += ["--js-runtimes", "deno"]
+        cmd.append(video_url)
 
-        result = subprocess.run(
-            [
-                "yt-dlp",
-                "--no-playlist",
-                "--restrict-filenames",
-                "--js-runtimes", js_runtime,
-                "--output", os.path.join(download_dir, "%(title)s.%(ext)s"),
-                "--print", "title",
-                video_url,
-            ],
+        result = subprocess.run(cmd,
             capture_output=True,
             text=True,
             timeout=1800,

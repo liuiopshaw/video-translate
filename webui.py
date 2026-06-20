@@ -533,7 +533,7 @@ def api_run():
 def main():
     """Start the web server and open browser."""
     import webbrowser
-    port = 8080
+    port = int(os.environ.get("PORT", "8090"))
 
     print(f"""
 ╔══════════════════════════════════════════════════╗

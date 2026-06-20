@@ -59,18 +59,11 @@ class TestIntegration:
         assert state["audio_wav"] != ""
 
         # Step 2: ASR
-        mock_whisperx = MagicMock()
-        with patch.dict(sys.modules, {"whisperx": mock_whisperx}):
+        mock_whisper = MagicMock()
+        with patch.dict(sys.modules, {"whisper": mock_whisper}):
             with patch("os.path.exists", return_value=True), \
-                 patch("whisperx.load_model") as mock_model, \
-                 patch("whisperx.load_audio"), \
-                 patch("whisperx.load_align_model") as mock_align_model, \
-                 patch("whisperx.align") as mock_align:
+                 patch("whisper.load_model") as mock_model:
                 mock_model.return_value.transcribe.return_value = {
-                    "segments": [{"start": 0.0, "end": 2.0, "text": "Hello world"}]
-                }
-                mock_align_model.return_value = (MagicMock(), {})
-                mock_align.return_value = {
                     "segments": [{"start": 0.0, "end": 2.0, "text": "Hello world"}]
                 }
                 state.update(run_asr(state))
