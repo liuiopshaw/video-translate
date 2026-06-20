@@ -81,7 +81,7 @@ class TestIntegration:
         with patch("subprocess.run") as mock_run, \
              patch("os.path.exists", return_value=True), \
              patch("os.makedirs"), \
-             patch("nodes.tts._concat_wavs"):
+             patch("nodes.tts._place_on_timeline"):
             state.update(run_tts(state))
         assert len(state["tts_segments"]) == 1
 

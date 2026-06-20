@@ -203,7 +203,7 @@ class TestTts:
         with patch("subprocess.run") as mock_run, \
              patch("os.makedirs"), \
              patch("os.path.exists", side_effect=[False, True, False, True]), \
-             patch("nodes.tts._concat_wavs"):
+             patch("nodes.tts._place_on_timeline"):
             mock_run.return_value = MagicMock(returncode=0)
 
             result = run_tts(state)
@@ -233,7 +233,7 @@ class TestTts:
 
         with patch("subprocess.run") as mock_run, \
              patch("os.path.exists", side_effect=[False, False, False, True]) as mock_exists, \
-             patch("nodes.tts._concat_wavs"):
+             patch("nodes.tts._place_on_timeline"):
             mock_run.side_effect = [
                 MagicMock(returncode=1, stderr="Error"),
                 MagicMock(returncode=0),
@@ -268,7 +268,7 @@ class TestTts:
             assert "zh-CN" in call_args[voice_idx + 1]
             assert "--rate" in call_args
             rate_idx = call_args.index("--rate")
-            assert "-15%" in call_args[rate_idx + 1]
+            assert "+15%" in call_args[rate_idx + 1]
 
 
 class TestSynthesis:

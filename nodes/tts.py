@@ -4,7 +4,7 @@ import subprocess
 from state import PipelineState, TSeg, Error
 
 VOICE = os.environ.get("TTS_VOICE", "zh-CN-YunxiNeural")
-RATE = "-15%"
+RATE = os.environ.get("TTS_RATE", "+15%")  # Faster for Chinese to keep pace with video
 
 
 def run_tts(state: PipelineState) -> dict:
@@ -108,9 +108,9 @@ def run_tts(state: PipelineState) -> dict:
             "stage": "tts",
         }
 
-    # Concat all into single cn_audio.wav
+    # Place segments on timeline at their original timestamps
     cn_audio = os.path.join(work_dir, "cn_audio.wav")
-    _concat_wavs([s["wav_path"] for s in segments], cn_audio)
+    _place_on_timeline(segments, cn_audio, state.get("metadata", {}))
 
     return {
         "tts_segments": segments,
@@ -120,18 +120,35 @@ def run_tts(state: PipelineState) -> dict:
     }
 
 
-def _concat_wavs(paths: list[str], output_path: str) -> None:
-    """Concatenate audio files using ffmpeg concat filter (handles mixed codecs).
+def _place_on_timeline(segments: list[dict], output_path: str, metadata: dict) -> None:
+    """Place TTS audio segments at their original timestamps using ffmpeg adelay.
 
-    Uses the concat filter instead of the demuxer because Edge TTS outputs
-    MP3-encoded data in files that may carry unexpected extensions.
+    This ensures audio stays in sync with video regardless of TTS speed.
+    Each segment is delayed by its start time, then all are mixed together.
+    The output duration matches the last segment's end time.
     """
-    # Build filter: [0][1][2]...concat=n=N:v=0:a=1[out]
     inputs = []
-    for p in paths:
-        inputs += ["-i", p]
-    n = len(paths)
-    filter_expr = "".join(f"[{i}:a]" for i in range(n)) + f"concat=n={n}:v=0:a=1[out]"
+    for seg in segments:
+        inputs += ["-i", seg["wav_path"]]
+
+    n = len(segments)
+
+    # Build adelay + amix filter chain
+    # Each input gets delayed by its start_time (in milliseconds)
+    delays = []
+    for seg in segments:
+        delay_ms = int(seg["start"] * 1000)
+        delays.append(f"adelay={delay_ms}|{delay_ms}")
+
+    # Mix all delayed streams together
+    filter_parts = []
+    for i in range(n):
+        filter_parts.append(f"[{i}:a]{delays[i]}[d{i}]")
+
+    mix_inputs = "".join(f"[d{i}]" for i in range(n))
+    filter_parts.append(f"{mix_inputs}amix=inputs={n}:duration=longest:dropout_transition=0[out]")
+
+    filter_expr = ";".join(filter_parts)
 
     result = subprocess.run(
         ["ffmpeg", "-y"] + inputs +
@@ -141,4 +158,4 @@ def _concat_wavs(paths: list[str], output_path: str) -> None:
     )
 
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg concat failed: {result.stderr[:200]}")
+        raise RuntimeError(f"ffmpeg timeline placement failed: {result.stderr[:200]}")
