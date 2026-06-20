@@ -12,15 +12,26 @@ def extract_audio(state: PipelineState) -> dict:
     Writes: state["audio_wav"], state["metadata"], state["stage"], state["errors"]
     Skips if audio_wav already exists.
     """
+    if not state.get("input_video"):
+        return {
+            "errors": [Error(
+                stage="extract",
+                message="No input video available — did download fail?",
+                retry_count=0,
+            )],
+            "metadata": {},
+            "stage": "extract",
+        }
+
     work_dir = os.path.join(".video-translate", state["video_title"])
     audio_wav = os.path.join(work_dir, "audio.wav")
 
     # Skip if already done
-    if os.path.exists(audio_wav) and state.get("audio_wav"):
+    if os.path.exists(audio_wav):
         return {
-            "audio_wav": state["audio_wav"],
+            "audio_wav": audio_wav,
+            "metadata": {"sample_rate": 16000, "channels": 1, "codec": "pcm_s16le", "format": "wav"},
             "stage": "asr",
-            "metadata": {"sample_rate": 16000, "channels": 1},
         }
 
     os.makedirs(work_dir, exist_ok=True)
@@ -51,7 +62,7 @@ def extract_audio(state: PipelineState) -> dict:
                     retry_count=0,
                 )],
                 "stage": "extract",
-                "metadata": {"sample_rate": 16000, "channels": 1},
+                "metadata": {},
             }
 
         return {
@@ -73,7 +84,7 @@ def extract_audio(state: PipelineState) -> dict:
                 retry_count=0,
             )],
             "stage": "extract",
-            "metadata": {"sample_rate": 16000, "channels": 1},
+            "metadata": {},
         }
     except subprocess.TimeoutExpired:
         return {
@@ -83,5 +94,5 @@ def extract_audio(state: PipelineState) -> dict:
                 retry_count=0,
             )],
             "stage": "extract",
-            "metadata": {"sample_rate": 16000, "channels": 1},
+            "metadata": {},
         }

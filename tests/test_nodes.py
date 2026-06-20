@@ -37,7 +37,7 @@ class TestExtractAudio:
             assert "pcm_s16le" in call_args
             assert "-vn" in call_args
 
-    def test_extract_audio_file_not_found_raises(self):
+    def test_extract_audio_file_not_found_returns_error(self):
         state = make_initial_state(input_path="/nonexistent/video.mp4")
 
         with patch("subprocess.run") as mock_run:
@@ -57,15 +57,14 @@ class TestExtractAudio:
             assert len(result["errors"]) == 1
             assert result["errors"][0]["stage"] == "extract"
 
-    def test_extract_audio_skips_if_audio_wav_exists_and_not_force(self):
+    def test_extract_audio_skips_if_audio_wav_exists(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
-        state["audio_wav"] = "/tmp/existing.wav"
 
         with patch("os.path.exists", return_value=True), \
              patch("subprocess.run") as mock_run:
             result = extract_audio(state)
 
-            assert result["audio_wav"] == "/tmp/existing.wav"
+            assert result["audio_wav"] == ".video-translate/lecture/audio.wav"
             mock_run.assert_not_called()
 
     def test_extract_audio_timeout_returns_error(self):
