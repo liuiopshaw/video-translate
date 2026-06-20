@@ -127,7 +127,7 @@ def _concat_wavs(wav_paths: list[str], output_path: str) -> None:
         for p in wav_paths:
             f.write(f"file '{p}'\n")
 
-    subprocess.run(
+    result = subprocess.run(
         ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_list,
          "-c", "copy", output_path],
         capture_output=True, text=True,
@@ -137,3 +137,6 @@ def _concat_wavs(wav_paths: list[str], output_path: str) -> None:
         os.remove(concat_list)
     except OSError:
         pass
+
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg concat failed: {result.stderr[:200]}")
