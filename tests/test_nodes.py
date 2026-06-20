@@ -392,13 +392,12 @@ class TestDownload:
         result = download_video(state)
         assert result == {"stage": "extract"}
 
-    def test_download_ytdlp_not_found(self):
+    def test_download_skips_if_already_downloaded(self):
         state = make_initial_state(input_path="https://youtube.com/watch?v=abc")
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError("yt-dlp")
+        state["input_video"] = "/tmp/existing.mp4"
+        with patch("os.path.exists", return_value=True):
             result = download_video(state)
-            assert len(result["errors"]) == 1
-            assert "yt-dlp" in result["errors"][0]["message"]
+            assert result == {"stage": "extract"}
 
     def test_download_failure_returns_error(self):
         state = make_initial_state(input_path="https://youtube.com/watch?v=abc")
@@ -413,6 +412,17 @@ class TestDownload:
              patch("os.makedirs") as mock_mkdir, \
              patch("glob.glob", return_value=["/tmp/video.mp4"]), \
              patch("os.path.getsize", return_value=1024):
-            mock_run.return_value = MagicMock(returncode=0, stdout="Title\nfile.mp4")
+            mock_run.return_value = MagicMock(returncode=0)
             download_video(state)
             mock_mkdir.assert_called()
+
+    def test_download_login_required_fallback_fails(self):
+        state = make_initial_state(input_path="https://youtube.com/watch?v=abc")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=1,
+                stderr="Sign in to confirm you're not a bot"
+            )
+            result = download_video(state)
+            assert len(result["errors"]) == 1
+            assert "登录" in result["errors"][0]["message"]
