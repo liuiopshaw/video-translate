@@ -377,12 +377,12 @@ class TestDownload:
         state["video_title"] = "video"
 
         with patch("subprocess.run") as mock_run, \
-             patch("glob.glob", return_value=["/tmp/video.mp4"]), \
+             patch("glob.glob", return_value=["/tmp/My_Lecture_Title.mp4"]), \
              patch("os.path.getsize", return_value=1024):
-            mock_run.return_value = MagicMock(returncode=0, stdout="My Lecture\nmy_lecture.mp4")
+            mock_run.return_value = MagicMock(returncode=0)
             result = download_video(state)
 
-            assert result["input_video"] == "/tmp/video.mp4"
+            assert result["input_video"] == "/tmp/My_Lecture_Title.mp4"
             assert result["video_title"] != "video"
             assert result["stage"] == "extract"
 

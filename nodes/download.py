@@ -31,8 +31,9 @@ def download_video(state: PipelineState) -> dict:
             "yt-dlp",
             "--no-playlist",
             "--restrict-filenames",
+            "--remote-components", "ejs:github",
+            "-f", "best[height<=720]",
             "--output", os.path.join(download_dir, "%(title)s.%(ext)s"),
-            "--print", "title",
         ]
         # Use multiple --js-runtimes flags (comma syntax was removed in newer yt-dlp)
         node_path = _find_node()
@@ -64,9 +65,7 @@ def download_video(state: PipelineState) -> dict:
                 "stage": "download",
             }
 
-        output_lines = result.stdout.strip().split("\n")
-        video_title = output_lines[0] if output_lines else state["video_title"]
-
+        # Find downloaded file by size (largest = video)
         downloaded = glob_module.glob(os.path.join(download_dir, "*"))
         if not downloaded:
             return {
@@ -80,6 +79,10 @@ def download_video(state: PipelineState) -> dict:
 
         downloaded.sort(key=os.path.getsize, reverse=True)
         input_video = downloaded[0]
+
+        # Extract title from filename (yt-dlp --restrict-filenames replaces spaces with _)
+        base = os.path.splitext(os.path.basename(input_video))[0]
+        video_title = base.replace("_", " ")
         safe_title = _sanitize_title(video_title)
 
         return {
