@@ -17,7 +17,11 @@ def download_video(state: PipelineState) -> dict:
     if not video_url:
         return {"stage": "extract"}
 
-    work_dir = os.path.join(".video-translate", state["video_title"])
+    if state.get("input_video") and os.path.exists(state.get("input_video", "")):
+        return {"stage": "extract"}
+
+    safe_title = _sanitize_title(state["video_title"])
+    work_dir = os.path.join(".video-translate", safe_title)
     download_dir = os.path.join(work_dir, "download")
     os.makedirs(download_dir, exist_ok=True)
 
