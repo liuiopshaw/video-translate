@@ -9,6 +9,7 @@ from nodes.asr import run_asr
 from nodes.translate import translate
 from nodes.tts import run_tts
 from nodes.synthesis import synthesize_audio
+from nodes.download import download_video
 from nodes.merge import merge_video
 
 
@@ -376,3 +377,50 @@ class TestMerge:
         state["stage"] = "done"
         result = merge_video(state)
         assert result == {"stage": "done"}
+
+
+class TestDownload:
+    def test_download_from_url(self):
+        state = make_initial_state(input_path="https://youtube.com/watch?v=abc123")
+        state["video_title"] = "video"
+
+        with patch("subprocess.run") as mock_run, \
+             patch("glob.glob", return_value=["/tmp/video.mp4"]), \
+             patch("os.path.getsize", return_value=1024):
+            mock_run.return_value = MagicMock(returncode=0, stdout="My Lecture\nmy_lecture.mp4")
+            result = download_video(state)
+
+            assert result["input_video"] == "/tmp/video.mp4"
+            assert result["video_title"] != "video"
+            assert result["stage"] == "extract"
+
+    def test_download_skips_if_url_empty(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        assert state["video_url"] == ""
+        result = download_video(state)
+        assert result == {"stage": "extract"}
+
+    def test_download_ytdlp_not_found(self):
+        state = make_initial_state(input_path="https://youtube.com/watch?v=abc")
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError("yt-dlp")
+            result = download_video(state)
+            assert len(result["errors"]) == 1
+            assert "yt-dlp" in result["errors"][0]["message"]
+
+    def test_download_failure_returns_error(self):
+        state = make_initial_state(input_path="https://youtube.com/watch?v=abc")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stderr="Video unavailable")
+            result = download_video(state)
+            assert len(result["errors"]) == 1
+
+    def test_download_output_dir_created(self):
+        state = make_initial_state(input_path="https://youtube.com/watch?v=abc123")
+        with patch("subprocess.run") as mock_run, \
+             patch("os.makedirs") as mock_mkdir, \
+             patch("glob.glob", return_value=["/tmp/video.mp4"]), \
+             patch("os.path.getsize", return_value=1024):
+            mock_run.return_value = MagicMock(returncode=0, stdout="Title\nfile.mp4")
+            download_video(state)
+            mock_mkdir.assert_called()
