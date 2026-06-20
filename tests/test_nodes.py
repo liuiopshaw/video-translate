@@ -1,9 +1,11 @@
 """Unit tests for pipeline nodes."""
+import sys
 import pytest
 import subprocess
 from unittest.mock import patch, MagicMock
 from state import PipelineState, make_initial_state, Sub, TSeg, Error
 from nodes.extract_audio import extract_audio
+from nodes.asr import run_asr
 
 
 class TestExtractAudio:
@@ -74,3 +76,61 @@ class TestExtractAudio:
             result = extract_audio(state)
             assert len(result["errors"]) == 1
             assert result["errors"][0]["stage"] == "extract"
+
+
+class TestAsr:
+    def test_run_asr_returns_subtitles(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["audio_wav"] = "/tmp/audio.wav"
+
+        mock_whisperx = MagicMock()
+        with patch.dict(sys.modules, {"whisperx": mock_whisperx}):
+            with patch("os.path.exists", return_value=True), \
+                 patch("whisperx.load_model") as mock_model, \
+                 patch("whisperx.load_audio") as mock_load:
+
+                mock_segments = [
+                    {"start": 0.0, "end": 2.5, "text": "Hello world"},
+                    {"start": 2.5, "end": 5.0, "text": "Welcome to the lecture"},
+                ]
+                mock_model.return_value.transcribe.return_value = {"segments": mock_segments}
+                mock_load.return_value = None
+
+                # Mock the alignment step
+                with patch("whisperx.load_align_model") as mock_align_model, \
+                     patch("whisperx.align") as mock_align:
+                    mock_align_model.return_value = (MagicMock(), {})
+                    mock_align.return_value = {"segments": mock_segments}
+
+                    result = run_asr(state)
+
+        assert len(result["subtitles_en"]) == 2
+        assert result["subtitles_en"][0]["text"] == "Hello world"
+        assert result["subtitles_en"][0]["index"] == 0
+        assert result["subtitles_en"][1]["text"] == "Welcome to the lecture"
+        assert result["stage"] == "translate"
+
+    def test_run_asr_skips_if_subtitles_exist(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["audio_wav"] = "/tmp/audio.wav"
+        state["subtitles_en"] = [
+            {"index": 0, "start": 0.0, "end": 1.0, "text": "Existing"}
+        ]
+
+        result = run_asr(state)
+        assert result == {"stage": "translate"}
+
+    def test_run_asr_no_audio_returns_error(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+
+        result = run_asr(state)
+        assert len(result["errors"]) == 1
+        assert result["errors"][0]["stage"] == "asr"
+
+    def test_run_asr_audio_not_found_returns_error(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["audio_wav"] = "/nonexistent/audio.wav"
+
+        with patch("os.path.exists", return_value=False):
+            result = run_asr(state)
+        assert len(result["errors"]) == 1
