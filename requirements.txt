@@ -6,3 +6,4 @@ edge-tts
 yt-dlp
 pytest
 pytest-mock
+flask
