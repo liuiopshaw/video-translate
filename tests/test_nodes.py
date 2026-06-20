@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 from state import PipelineState, make_initial_state, Sub, TSeg, Error
 from nodes.extract_audio import extract_audio
 from nodes.asr import run_asr
+from nodes.translate import translate
 
 
 class TestExtractAudio:
@@ -134,3 +135,62 @@ class TestAsr:
         with patch("os.path.exists", return_value=False):
             result = run_asr(state)
         assert len(result["errors"]) == 1
+
+
+class TestTranslate:
+    def test_translate_returns_chinese_subtitles(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["subtitles_en"] = [
+            {"index": 0, "start": 0.0, "end": 2.5, "text": "Hello world"},
+            {"index": 1, "start": 2.5, "end": 5.0, "text": "Machine learning is fascinating"},
+        ]
+
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = (
+            '{"subtitles": ['
+            '{"index": 0, "start": 0.0, "end": 2.5, "text": "大家好"},'
+            '{"index": 1, "start": 2.5, "end": 5.0, "text": "机器学习非常迷人"}'
+            ']}'
+        )
+        mock_llm.invoke.return_value = mock_response
+
+        result = translate(state, llm=mock_llm)
+
+        assert len(result["subtitles_cn"]) == 2
+        assert result["subtitles_cn"][0]["text"] == "大家好"
+        assert result["subtitles_cn"][1]["text"] == "机器学习非常迷人"
+        assert result["stage"] == "tts"
+
+    def test_translate_skips_if_cn_subtitles_exist(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["subtitles_en"] = [{"index": 0, "start": 0.0, "end": 1.0, "text": "Hello"}]
+        state["subtitles_cn"] = [{"index": 0, "start": 0.0, "end": 1.0, "text": "你好"}]
+
+        mock_llm = MagicMock()
+        result = translate(state, llm=mock_llm)
+        assert result == {"stage": "tts"}
+
+    def test_translate_empty_en_subtitles_returns_error(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+
+        mock_llm = MagicMock()
+        result = translate(state, llm=mock_llm)
+        assert len(result["errors"]) == 1
+        assert result["errors"][0]["stage"] == "translate"
+
+    def test_translate_llm_retry_on_format_error(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["subtitles_en"] = [
+            {"index": 0, "start": 0.0, "end": 1.0, "text": "Hello"},
+        ]
+
+        mock_llm = MagicMock()
+        mock_llm.invoke.side_effect = [
+            MagicMock(content="not valid json"),
+            MagicMock(content='{"subtitles": [{"index": 0, "start": 0.0, "end": 1.0, "text": "你好"}]}'),
+        ]
+
+        result = translate(state, llm=mock_llm)
+        assert len(result["subtitles_cn"]) == 1
+        assert mock_llm.invoke.call_count == 2
