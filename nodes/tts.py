@@ -1,11 +1,13 @@
 """Node ④: Generate Chinese TTS audio using Edge TTS."""
 import os
 import subprocess
+import time
 from state import PipelineState, TSeg, Error
 
 VOICE = os.environ.get("TTS_VOICE", "zh-CN-YunxiNeural")
 RATE = os.environ.get("TTS_RATE", "+15%")
-LOUDNORM_TARGET = "-16"  # LUFS target for consistent volume across segments
+LOUDNORM_TARGET = "-16"
+MIN_FILE_SIZE = 500  # bytes — anything smaller is a failed generation
 
 
 def run_tts(state: PipelineState) -> dict:
@@ -49,6 +51,12 @@ def run_tts(state: PipelineState) -> dict:
             ))
             continue
 
+        # Rate-limit: pause between sentences to avoid Edge TTS throttling
+        if len(segments) > 0 and len(segments) % 10 == 0:
+            time.sleep(2.0)  # longer pause every 10 sentences
+        else:
+            time.sleep(0.3)  # light gap between sentences
+
         ok = _generate_tts(sub["text"], raw_path, sub["index"])
         if not ok:
             errors.append(Error(
@@ -90,25 +98,51 @@ def run_tts(state: PipelineState) -> dict:
 
 
 def _generate_tts(text: str, output: str, idx: int) -> bool:
-    """Generate TTS audio for one segment. Retries once on timeout."""
-    for attempt in range(2):
-        timeout = 30 if attempt == 0 else 60
+    """Generate TTS audio with retry logic using text-file input to avoid encoding issues."""
+    # Write text to a temp file — avoids shell/encoding problems with long Chinese text
+    text_file = output + ".txt"
+    with open(text_file, "w", encoding="utf-8") as f:
+        f.write(text)
+
+    for attempt in range(3):
         try:
             result = subprocess.run(
                 ["edge-tts", "--voice", VOICE, "--rate", RATE,
-                 "--text", text, "--write-media", output],
-                capture_output=True, text=True, timeout=timeout,
+                 "--file", text_file, "--write-media", output],
+                capture_output=True, text=True, timeout=60,
             )
-            if result.returncode == 0 and os.path.exists(output):
-                return True
-        except subprocess.TimeoutExpired:
-            if attempt == 0:
-                continue
-        except Exception:
-            if attempt == 0:
-                continue
 
+            # Check for real success: file exists AND has content
+            if (result.returncode == 0
+                    and os.path.exists(output)
+                    and os.path.getsize(output) >= MIN_FILE_SIZE):
+                _safe_remove(text_file)
+                return True
+
+            # File too small or missing — clean up and retry
+            if os.path.exists(output):
+                os.remove(output)
+
+            # Rate limiting — wait between retries
+            if attempt < 2:
+                time.sleep(1.0 * (attempt + 1))
+
+        except subprocess.TimeoutExpired:
+            if attempt < 2:
+                time.sleep(2.0)
+        except Exception:
+            if attempt < 2:
+                time.sleep(1.0)
+
+    _safe_remove(text_file)
     return False
+
+
+def _safe_remove(path: str) -> None:
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 def _loudnorm(input_path: str, output_path: str, idx: int) -> bool:

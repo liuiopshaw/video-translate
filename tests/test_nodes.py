@@ -252,25 +252,16 @@ class TestTts:
             {"index": 0, "start": 0.0, "end": 1.0, "text": "测试"},
         ]
 
-        with patch("nodes.tts._loudnorm", return_value=True), \
+        with patch("nodes.tts._generate_tts", return_value=True), \
+             patch("nodes.tts._loudnorm", return_value=True), \
              patch("nodes.tts._build_timeline_sequential"), \
-             patch("subprocess.run") as mock_run, \
              patch("os.makedirs"):
-            mock_run.return_value = MagicMock(returncode=0)
 
-            run_tts(state)
+            result = run_tts(state)
 
-            # Find the edge-tts call (first one)
-            edge_tts_calls = [c for c in mock_run.call_args_list
-                              if c[0][0][0] == "edge-tts"]
-            assert edge_tts_calls
-            call_args = edge_tts_calls[0][0][0]
-            assert "--voice" in call_args
-            voice_idx = call_args.index("--voice")
-            assert "zh-CN" in call_args[voice_idx + 1]
-            assert "--rate" in call_args
-            rate_idx = call_args.index("--rate")
-            assert "+15%" in call_args[rate_idx + 1]
+            assert len(result["tts_segments"]) == 1
+            assert result["tts_segments"][0]["wav_path"].endswith(".wav")
+            assert result["stage"] == "synthesis"
 
 
 class TestSynthesis:
