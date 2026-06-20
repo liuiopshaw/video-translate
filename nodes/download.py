@@ -26,12 +26,16 @@ def download_video(state: PipelineState) -> dict:
     os.makedirs(download_dir, exist_ok=True)
 
     try:
+        # Detect Node.js path for YouTube JavaScript extraction
+        node_path = _find_node()
+        js_runtime = f"node:{node_path},deno" if node_path else "node,deno"
+
         result = subprocess.run(
             [
                 "yt-dlp",
                 "--no-playlist",
                 "--restrict-filenames",
-                "--js-runtimes", "node,deno",
+                "--js-runtimes", js_runtime,
                 "--output", os.path.join(download_dir, "%(title)s.%(ext)s"),
                 "--print", "title",
                 video_url,
@@ -108,3 +112,10 @@ def _sanitize_title(title: str) -> str:
     if len(safe) > 80:
         safe = safe[:77] + "..."
     return safe if safe else "video"
+
+
+def _find_node() -> str:
+    """Find Node.js binary path for yt-dlp JavaScript runtime."""
+    import shutil
+    node = shutil.which("node")
+    return node if node else ""
