@@ -1,6 +1,7 @@
 """Node ②: Speech recognition using OpenAI Whisper."""
 import os
 from state import PipelineState, Sub, Error
+from nodes.utils import save_srt
 
 
 def run_asr(state: PipelineState) -> dict:
@@ -52,6 +53,10 @@ def run_asr(state: PipelineState) -> dict:
                 end=seg["end"],
                 text=seg["text"].strip(),
             ))
+
+        # Save English SRT to disk
+        work_dir = os.path.join(".video-translate", state["video_title"])
+        save_srt(subtitles, os.path.join(work_dir, "subtitles_en.srt"))
 
         return {
             "subtitles_en": subtitles,

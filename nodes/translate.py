@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from state import PipelineState, Sub, Error
+from nodes.utils import save_srt, save_bilingual_srt
 
 try:
     from langchain_openai import ChatOpenAI
@@ -99,6 +100,11 @@ def translate(state: PipelineState, llm=None) -> dict:
             parsed = _parse_translation_response(response.content)
 
             if parsed and len(parsed) == len(en_subs):
+                # Save Chinese and bilingual SRT to disk
+                work_dir = os.path.join(".video-translate", state["video_title"])
+                save_srt(parsed, os.path.join(work_dir, "subtitles_cn.srt"))
+                save_bilingual_srt(en_subs, parsed, os.path.join(work_dir, "subtitles_bilingual.srt"))
+
                 return {
                     "subtitles_cn": parsed,
                     "stage": "tts",
