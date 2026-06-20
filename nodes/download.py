@@ -31,6 +31,7 @@ def download_video(state: PipelineState) -> dict:
                 "yt-dlp",
                 "--no-playlist",
                 "--restrict-filenames",
+                "--js-runtimes", "node,deno",
                 "--output", os.path.join(download_dir, "%(title)s.%(ext)s"),
                 "--print", "title",
                 video_url,
@@ -41,10 +42,16 @@ def download_video(state: PipelineState) -> dict:
         )
 
         if result.returncode != 0:
+            stderr = result.stderr
+            msg = f"yt-dlp failed: {stderr[:200]}"
+            if "JavaScript runtime" in stderr or "js-runtimes" in stderr:
+                msg = ("yt-dlp 需要 JavaScript 运行时。\n"
+                       "安装 Node.js: brew install node\n"
+                       "原始错误: " + stderr[:150])
             return {
                 "errors": [Error(
                     stage="download",
-                    message=f"yt-dlp failed: {result.stderr[:200]}",
+                    message=msg,
                     retry_count=0,
                 )],
                 "stage": "download",
