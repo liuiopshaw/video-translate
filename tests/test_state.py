@@ -12,8 +12,7 @@ class TestSub:
         assert sub["text"] == "Hello world"
 
     def test_sub_defaults(self):
-        # Sub has no defaults — all fields required
-        pass
+        assert Sub.__required_keys__ == frozenset({"index", "start", "end", "text"})
 
 
 class TestPipelineState:

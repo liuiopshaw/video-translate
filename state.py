@@ -1,5 +1,8 @@
 """Pipeline state types for the video-translate agent."""
+import os
 from typing import TypedDict
+
+__all__ = ["Sub", "TSeg", "Error", "PipelineState", "make_initial_state"]
 
 
 class Sub(TypedDict):
@@ -53,16 +56,12 @@ class PipelineState(TypedDict, total=False):
 def make_initial_state(
     input_path: str,
     output_path: str = "",
-    resume: bool = False,
-    force: bool = False,
     keep_bgm: bool = True,
 ) -> PipelineState:
     """Build the initial PipelineState from CLI arguments.
 
     Auto-detects whether input_path is a URL or local file.
     """
-    import os
-
     is_url = input_path.startswith(("http://", "https://"))
 
     if is_url:
