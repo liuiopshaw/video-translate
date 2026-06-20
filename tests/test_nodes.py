@@ -7,6 +7,7 @@ from state import PipelineState, make_initial_state, Sub, TSeg, Error
 from nodes.extract_audio import extract_audio
 from nodes.asr import run_asr
 from nodes.translate import translate
+from nodes.tts import run_tts
 
 
 class TestExtractAudio:
@@ -194,3 +195,82 @@ class TestTranslate:
         result = translate(state, llm=mock_llm)
         assert len(result["subtitles_cn"]) == 1
         assert mock_llm.invoke.call_count == 2
+
+
+class TestTts:
+    def test_run_tts_generates_segments(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["subtitles_cn"] = [
+            {"index": 0, "start": 0.0, "end": 2.5, "text": "大家好"},
+            {"index": 1, "start": 2.5, "end": 5.0, "text": "欢迎来到课程"},
+        ]
+
+        with patch("subprocess.run") as mock_run, \
+             patch("os.makedirs"), \
+             patch("os.path.exists", side_effect=[False, True, False, True]), \
+             patch("nodes.tts._concat_wavs"):
+            mock_run.return_value = MagicMock(returncode=0)
+
+            result = run_tts(state)
+
+            assert len(result["tts_segments"]) == 2
+            assert result["tts_segments"][0]["index"] == 0
+            assert result["tts_segments"][0]["start"] == 0.0
+            assert result["tts_segments"][0]["end"] == 2.5
+            assert result["tts_segments"][0]["wav_path"].endswith(".wav")
+            assert result["stage"] == "synthesis"
+            assert mock_run.call_count == 2  # one per segment
+
+    def test_run_tts_skips_if_tts_segments_exist(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["subtitles_cn"] = [{"index": 0, "start": 0.0, "end": 1.0, "text": "你好"}]
+        state["tts_segments"] = [{"index": 0, "start": 0.0, "end": 1.0, "wav_path": "/tmp/0.wav"}]
+
+        result = run_tts(state)
+        assert result == {"stage": "synthesis"}
+
+    def test_run_tts_skip_on_failure_continues(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["subtitles_cn"] = [
+            {"index": 0, "start": 0.0, "end": 1.0, "text": "第一句"},
+            {"index": 1, "start": 1.0, "end": 2.0, "text": "第二句"},
+        ]
+
+        with patch("subprocess.run") as mock_run, \
+             patch("os.path.exists", side_effect=[False, False, False, True]) as mock_exists, \
+             patch("nodes.tts._concat_wavs"):
+            mock_run.side_effect = [
+                MagicMock(returncode=1, stderr="Error"),
+                MagicMock(returncode=0),
+            ]
+
+            result = run_tts(state)
+
+            assert len(result["tts_segments"]) == 1
+            assert result["tts_segments"][0]["index"] == 1
+            assert len(result["errors"]) == 1
+
+    def test_run_tts_empty_cn_subtitles_returns_error(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+
+        result = run_tts(state)
+        assert len(result["errors"]) == 1
+
+    def test_run_tts_uses_chinese_voice(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["subtitles_cn"] = [
+            {"index": 0, "start": 0.0, "end": 1.0, "text": "测试"},
+        ]
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0)
+
+            run_tts(state)
+
+            call_args = mock_run.call_args[0][0]
+            assert "--voice" in call_args
+            voice_idx = call_args.index("--voice")
+            assert "zh-CN" in call_args[voice_idx + 1]
+            assert "--rate" in call_args
+            rate_idx = call_args.index("--rate")
+            assert "-15%" in call_args[rate_idx + 1]
