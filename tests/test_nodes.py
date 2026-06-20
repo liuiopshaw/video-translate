@@ -9,6 +9,7 @@ from nodes.asr import run_asr
 from nodes.translate import translate
 from nodes.tts import run_tts
 from nodes.synthesis import synthesize_audio
+from nodes.merge import merge_video
 
 
 class TestExtractAudio:
@@ -337,3 +338,41 @@ class TestSynthesis:
 
         result = synthesize_audio(state)
         assert len(result["errors"]) == 1
+
+
+class TestMerge:
+    def test_merge_produces_output_video(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["cn_audio_mixed"] = "/tmp/cn_audio_mixed.wav"
+
+        with patch("subprocess.run") as mock_run, \
+             patch("os.path.exists", side_effect=lambda p: p in ("/tmp/cn_audio_mixed.wav",)):
+            mock_run.return_value = MagicMock(returncode=0)
+            result = merge_video(state)
+
+            assert result["stage"] == "done"
+            call_args = mock_run.call_args[0][0]
+            assert call_args[0] == "ffmpeg"
+            assert "-map" in call_args
+
+    def test_merge_no_audio_returns_error(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        result = merge_video(state)
+        assert len(result["errors"]) == 1
+
+    def test_merge_ffmpeg_timeout_returns_error(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["cn_audio_mixed"] = "/tmp/cn_audio_mixed.wav"
+
+        with patch("subprocess.run") as mock_run, \
+             patch("os.path.exists", return_value=True):
+            mock_run.side_effect = subprocess.TimeoutExpired("ffmpeg", 600)
+            result = merge_video(state)
+            assert len(result["errors"]) == 1
+
+    def test_merge_skips_if_done(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        state["cn_audio_mixed"] = "/tmp/mixed.wav"
+        state["stage"] = "done"
+        result = merge_video(state)
+        assert result == {"stage": "done"}
