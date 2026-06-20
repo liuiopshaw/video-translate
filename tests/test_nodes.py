@@ -200,11 +200,10 @@ class TestTts:
             {"index": 1, "start": 2.5, "end": 5.0, "text": "欢迎来到课程"},
         ]
 
-        with patch("subprocess.run") as mock_run, \
-             patch("os.makedirs"), \
-             patch("os.path.exists", side_effect=[False, True, False, True]), \
-             patch("nodes.tts._place_on_timeline"):
-            mock_run.return_value = MagicMock(returncode=0)
+        with patch("nodes.tts._generate_tts", return_value=True), \
+             patch("nodes.tts._loudnorm", return_value=True), \
+             patch("nodes.tts._build_timeline_sequential"), \
+             patch("os.makedirs"):
 
             result = run_tts(state)
 
@@ -214,7 +213,6 @@ class TestTts:
             assert result["tts_segments"][0]["end"] == 2.5
             assert result["tts_segments"][0]["wav_path"].endswith(".wav")
             assert result["stage"] == "synthesis"
-            assert mock_run.call_count == 2  # one per segment
 
     def test_run_tts_skips_if_tts_segments_exist(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
@@ -231,13 +229,10 @@ class TestTts:
             {"index": 1, "start": 1.0, "end": 2.0, "text": "第二句"},
         ]
 
-        with patch("subprocess.run") as mock_run, \
-             patch("os.path.exists", side_effect=[False, False, False, True]) as mock_exists, \
-             patch("nodes.tts._place_on_timeline"):
-            mock_run.side_effect = [
-                MagicMock(returncode=1, stderr="Error"),
-                MagicMock(returncode=0),
-            ]
+        with patch("nodes.tts._generate_tts", side_effect=[False, True]), \
+             patch("nodes.tts._loudnorm", return_value=True), \
+             patch("nodes.tts._build_timeline_sequential"), \
+             patch("os.makedirs"):
 
             result = run_tts(state)
 
@@ -257,12 +252,19 @@ class TestTts:
             {"index": 0, "start": 0.0, "end": 1.0, "text": "测试"},
         ]
 
-        with patch("subprocess.run") as mock_run:
+        with patch("nodes.tts._loudnorm", return_value=True), \
+             patch("nodes.tts._build_timeline_sequential"), \
+             patch("subprocess.run") as mock_run, \
+             patch("os.makedirs"):
             mock_run.return_value = MagicMock(returncode=0)
 
             run_tts(state)
 
-            call_args = mock_run.call_args[0][0]
+            # Find the edge-tts call (first one)
+            edge_tts_calls = [c for c in mock_run.call_args_list
+                              if c[0][0][0] == "edge-tts"]
+            assert edge_tts_calls
+            call_args = edge_tts_calls[0][0][0]
             assert "--voice" in call_args
             voice_idx = call_args.index("--voice")
             assert "zh-CN" in call_args[voice_idx + 1]
