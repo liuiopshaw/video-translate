@@ -1,0 +1,8 @@
+langchain>=1.3.0
+langgraph>=1.2.0
+langchain-openai
+whisperx
+edge-tts
+yt-dlp
+pytest
+pytest-mock
