@@ -1,4 +1,5 @@
 """Node ①: Extract audio track from video file using ffmpeg."""
+import json
 import os
 import subprocess
 from state import PipelineState, Error
@@ -16,7 +17,11 @@ def extract_audio(state: PipelineState) -> dict:
 
     # Skip if already done
     if os.path.exists(audio_wav) and state.get("audio_wav"):
-        return {"audio_wav": state["audio_wav"], "stage": "asr"}
+        return {
+            "audio_wav": state["audio_wav"],
+            "stage": "asr",
+            "metadata": {"sample_rate": 16000, "channels": 1},
+        }
 
     os.makedirs(work_dir, exist_ok=True)
 
@@ -46,11 +51,18 @@ def extract_audio(state: PipelineState) -> dict:
                     retry_count=0,
                 )],
                 "stage": "extract",
+                "metadata": {"sample_rate": 16000, "channels": 1},
             }
 
         return {
             "audio_wav": audio_wav,
             "stage": "asr",
+            "metadata": {
+                "sample_rate": 16000,
+                "channels": 1,
+                "codec": "pcm_s16le",
+                "format": "wav",
+            },
         }
 
     except FileNotFoundError:
@@ -61,6 +73,7 @@ def extract_audio(state: PipelineState) -> dict:
                 retry_count=0,
             )],
             "stage": "extract",
+            "metadata": {"sample_rate": 16000, "channels": 1},
         }
     except subprocess.TimeoutExpired:
         return {
@@ -70,4 +83,5 @@ def extract_audio(state: PipelineState) -> dict:
                 retry_count=0,
             )],
             "stage": "extract",
+            "metadata": {"sample_rate": 16000, "channels": 1},
         }
