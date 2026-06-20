@@ -1,5 +1,6 @@
 """Node ⑥: Merge Chinese audio with original video using ffmpeg."""
 import os
+import shutil
 import subprocess
 from state import PipelineState, Error
 
@@ -65,6 +66,8 @@ def merge_video(state: PipelineState) -> dict:
                     "stage": "merge",
                 }
 
+        # Copy subtitle files alongside the output video
+        _copy_subtitles(state)
         return {"stage": "done"}
 
     except FileNotFoundError:
@@ -85,6 +88,22 @@ def merge_video(state: PipelineState) -> dict:
             )],
             "stage": "merge",
         }
+
+
+def _copy_subtitles(state: PipelineState) -> None:
+    """Copy SRT files from work dir to the output video's directory."""
+    work_dir = os.path.join(".video-translate", state["video_title"])
+    output_dir = os.path.dirname(os.path.abspath(state["output_video"]))
+    if not output_dir:
+        output_dir = "."
+
+    for name in ["subtitles_en.srt", "subtitles_cn.srt", "subtitles_bilingual.srt"]:
+        src = os.path.join(work_dir, name)
+        if os.path.exists(src):
+            # Derive output filename from video name
+            base = os.path.splitext(os.path.basename(state["output_video"]))[0]
+            dst = os.path.join(output_dir, f"{base}_{name}")
+            shutil.copy2(src, dst)
 
 
 def _build_fallback_cmd(input_video: str, audio: str, srt: str, output: str) -> list:
