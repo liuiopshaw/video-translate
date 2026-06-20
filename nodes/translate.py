@@ -1,10 +1,18 @@
 """Node ③: Translate English subtitles to Chinese using DeepSeek API."""
 import json
+import logging
 import os
 import re
 from state import PipelineState, Sub, Error
 
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "REPLACED_API_KEY")
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    ChatOpenAI = None
+
+logger = logging.getLogger(__name__)
+
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 MODEL_NAME = os.environ.get("TRANSLATE_MODEL", "deepseek-v4-pro")
 
@@ -56,7 +64,24 @@ def translate(state: PipelineState, llm=None) -> dict:
     input_json = json.dumps({"subtitles": en_subs}, ensure_ascii=False)
 
     if llm is None:
-        from langchain_openai import ChatOpenAI
+        if not DEEPSEEK_API_KEY:
+            return {
+                "errors": [Error(
+                    stage="translate",
+                    message="DEEPSEEK_API_KEY not set. Export it or set in environment.",
+                    retry_count=0,
+                )],
+                "stage": "translate",
+            }
+        if ChatOpenAI is None:
+            return {
+                "errors": [Error(
+                    stage="translate",
+                    message="langchain_openai is not installed. Run: pip install langchain-openai",
+                    retry_count=0,
+                )],
+                "stage": "translate",
+            }
         llm = ChatOpenAI(
             model=MODEL_NAME,
             api_key=DEEPSEEK_API_KEY,
@@ -80,18 +105,21 @@ def translate(state: PipelineState, llm=None) -> dict:
                 }
 
             if attempt < MAX_RETRIES:
+                logger.warning("Translate attempt %d/%d failed (format/parse error), retrying...", attempt, MAX_RETRIES)
                 continue
 
         except Exception as e:
-            if attempt >= MAX_RETRIES:
-                return {
-                    "errors": [Error(
-                        stage="translate",
-                        message=f"Translation failed after {MAX_RETRIES} attempts: {e}",
-                        retry_count=attempt,
-                    )],
-                    "stage": "translate",
-                }
+            if attempt < MAX_RETRIES and _is_retryable(e):
+                logger.warning("Translate attempt %d/%d failed, retrying...", attempt, MAX_RETRIES)
+                continue
+            return {
+                "errors": [Error(
+                    stage="translate",
+                    message=f"Translation failed after {attempt} attempt(s): {e}",
+                    retry_count=attempt,
+                )],
+                "stage": "translate",
+            }
 
     return {
         "errors": [Error(
@@ -101,6 +129,38 @@ def translate(state: PipelineState, llm=None) -> dict:
         )],
         "stage": "translate",
     }
+
+
+def _is_retryable(e: Exception) -> bool:
+    """Check if an exception is a transient error worth retrying.
+
+    Retryable: connection errors, timeouts, rate limits, server errors.
+    Non-retryable: programming errors like TypeError, ValueError, ImportError.
+    """
+    retryable_substrings = (
+        "timeout",
+        "timed out",
+        "connection",
+        "reset by peer",
+        "broken pipe",
+        "rate limit",
+        "too many requests",
+        "429",
+        "503",
+        "502",
+        "500",
+        "server error",
+        "service unavailable",
+        "overloaded",
+    )
+    msg = str(e).lower()
+    for substr in retryable_substrings:
+        if substr in msg:
+            return True
+    # Also retry on generic OSError subclasses that indicate network issues
+    if isinstance(e, (ConnectionError, TimeoutError, OSError)):
+        return True
+    return False
 
 
 def _parse_translation_response(content: str) -> list[Sub] | None:
