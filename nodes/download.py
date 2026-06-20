@@ -42,8 +42,9 @@ def download_video(state: PipelineState) -> dict:
 
     # ---- Level 2: yt-dlp + browser cookies ----
     if _needs_login(stderr):
+        cookies_file = os.path.join(work_dir, "cookies.txt")
         for browser in ["chrome", "safari", "firefox", "edge"]:
-            result = _try_ytdlp(video_url, output_tmpl, cookies_browser=browser)
+            result = _try_ytdlp(video_url, output_tmpl, cookies_browser=browser, cookies_file=cookies_file)
             if result.get("file"):
                 return _finalize(result, download_dir)
 
@@ -75,7 +76,7 @@ def download_video(state: PipelineState) -> dict:
     }
 
 
-def _try_ytdlp(url: str, output: str, cookies_browser: str = "") -> dict:
+def _try_ytdlp(url: str, output: str, cookies_browser: str = "", cookies_file: str = "") -> dict:
     """Run yt-dlp and return result dict with 'file' key if successful."""
     node_path = shutil.which("node") or ""
     deno_path = shutil.which("deno") or ""
@@ -100,6 +101,8 @@ def _try_ytdlp(url: str, output: str, cookies_browser: str = "") -> dict:
     # Browser cookies for login-required videos
     if cookies_browser:
         cmd += ["--cookies-from-browser", cookies_browser]
+    if cookies_file:
+        cmd += ["--cookies", cookies_file]
 
     cmd.append(url)
 
