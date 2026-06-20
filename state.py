@@ -75,7 +75,9 @@ def make_initial_state(
         video_title = basename
 
     if not output_path:
-        output_path = f"{video_title}_cn.mp4"
+        movies_dir = os.path.expanduser("~/Movies")
+        os.makedirs(movies_dir, exist_ok=True)
+        output_path = os.path.join(movies_dir, f"{video_title}_cn.mp4")
 
     return PipelineState(
         video_url=video_url,

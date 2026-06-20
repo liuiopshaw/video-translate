@@ -14,12 +14,17 @@ pip install -r requirements.txt
 
 ## 用法
 
+输出默认保存到 `~/Movies/`，命名规则为 `{原标题}_cn.mp4`。
+
 ```bash
-# 本地文件
+# 本地文件 → ~/Movies/lecture_cn.mp4
 python cli.py lecture.mp4
 
-# URL 下载
+# URL 下载 → ~/Movies/{标题}_cn.mp4
 python cli.py "https://youtube.com/watch?v=xxx"
+
+# 指定输出路径
+python cli.py lecture.mp4 -o ~/Desktop/result.mp4
 
 # 断点续传
 python cli.py lecture.mp4 --resume
