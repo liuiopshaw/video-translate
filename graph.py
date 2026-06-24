@@ -8,6 +8,7 @@ Graph structure:
                        conditional exit: stop on hard error
 """
 
+import os
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from state import PipelineState
@@ -15,9 +16,15 @@ from nodes.download import download_video
 from nodes.extract_audio import extract_audio
 from nodes.asr import run_asr
 from nodes.translate import translate
-from nodes.tts import run_tts
 from nodes.synthesis import synthesize_audio
 from nodes.merge import merge_video
+
+# Auto-select TTS engine
+_TTS_ENGINE = os.environ.get("TTS_ENGINE", "edge")
+if _TTS_ENGINE == "voxcpm":
+    from nodes.tts_voxcpm import run_tts
+else:
+    from nodes.tts import run_tts
 
 
 def build_graph() -> StateGraph:
