@@ -14,6 +14,7 @@ import tempfile
 from state import PipelineState, TSeg, Error
 
 VOXCPM_SPACE = os.environ.get("VOXCPM_SPACE", "OpenBMB/VoxCPM-Demo")
+VOXCPM_VOICE = os.environ.get("VOXCPM_VOICE", "一位沉稳专业的男性播报员，声音清晰有力")
 LOUDNORM_TARGET = "-16"
 
 _client = None
@@ -122,13 +123,16 @@ def run_tts(state: PipelineState) -> dict:
 
 
 def _generate_voxcpm(text: str, output: str) -> bool:
-    """Generate TTS via VoxCPM2 Gradio API. Returns True on success."""
+    """Generate TTS via VoxCPM2 Gradio API. Returns True on success.
+
+    Uses VOXCPM_VOICE env var as control_instruction for consistent timbre.
+    """
     for attempt in range(2):
         try:
             client = _get_client()
             result = client.predict(
                 text_input=text,
-                control_instruction="",
+                control_instruction=VOXCPM_VOICE,
                 reference_wav_path_input=None,
                 use_prompt_text=False,
                 prompt_text_input="",
