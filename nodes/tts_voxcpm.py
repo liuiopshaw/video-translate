@@ -15,16 +15,20 @@ from nodes.tts_utils import fulltext_tts_pipeline
 
 VOXCPM_SPACE = os.environ.get("VOXCPM_SPACE", "OpenBMB/VoxCPM-Demo")
 VOXCPM_VOICE = os.environ.get("VOXCPM_VOICE", "一位沉稳专业的男性播报员，声音清晰有力")
-BATCH_CHARS = 500  # Max chars per VoxCPM2 API call
+BATCH_CHARS = int(os.environ.get("VOXCPM_BATCH_CHARS", "800"))
 
 _client = None
 
 
 def _get_client():
+    """Lazy-load Gradio client with long HTTP timeout."""
     global _client
     if _client is None:
         from gradio_client import Client
-        _client = Client(VOXCPM_SPACE)
+        _client = Client(
+            VOXCPM_SPACE,
+            httpx_kwargs={"timeout": 180},  # 3 min — max our side can wait
+        )
         print("   ✅ VoxCPM2 connected")
     return _client
 
@@ -102,7 +106,7 @@ def _generate_fulltext_voxcpm(text: str, output: str) -> bool:
 
     for attempt in range(3):
         try:
-            result = client.predict(
+            future = client.submit(
                 text_input=text,
                 control_instruction=VOXCPM_VOICE,
                 reference_wav_path_input=None,
@@ -113,6 +117,7 @@ def _generate_fulltext_voxcpm(text: str, output: str) -> bool:
                 denoise=False,
                 api_name="/generate",
             )
+            result = future.result(timeout=180)  # wait up to 3 min
             if isinstance(result, str) and os.path.exists(result):
                 shutil.copy(result, output)
                 if os.path.getsize(output) >= 500:
@@ -171,10 +176,10 @@ def _generate_fulltext_voxcpm(text: str, output: str) -> bool:
 
 
 def _generate_per_sentence(text: str, output: str) -> bool:
-    """Single-sentence VoxCPM2 call."""
+    """Single-sentence VoxCPM2 call with long timeout."""
     client = _get_client()
     try:
-        result = client.predict(
+        future = client.submit(
             text_input=text,
             control_instruction=VOXCPM_VOICE,
             reference_wav_path_input=None,
@@ -182,6 +187,7 @@ def _generate_per_sentence(text: str, output: str) -> bool:
             cfg_value_input=2.0, do_normalize=False, denoise=False,
             api_name="/generate",
         )
+        result = future.result(timeout=180)
         if isinstance(result, str) and os.path.exists(result):
             shutil.copy(result, output)
             return os.path.getsize(output) >= 500
