@@ -200,8 +200,10 @@ class TestTts:
             {"index": 1, "start": 2.5, "end": 5.0, "text": "欢迎来到课程"},
         ]
 
-        with patch("nodes.tts._generate_tts", return_value=True), \
-             patch("nodes.tts._loudnorm", return_value=True), \
+        with patch("nodes.tts_utils._get_duration", return_value=10.0), \
+             patch("nodes.tts_utils._extract_segment"), \
+             patch("nodes.tts_utils._loudnorm", return_value=True), \
+             patch("nodes.tts._generate_fulltext", return_value=True), \
              patch("nodes.tts._build_timeline_sequential"), \
              patch("os.makedirs"):
 
@@ -210,8 +212,7 @@ class TestTts:
             assert len(result["tts_segments"]) == 2
             assert result["tts_segments"][0]["index"] == 0
             assert result["tts_segments"][0]["start"] == 0.0
-            assert result["tts_segments"][0]["end"] == 2.5
-            assert result["tts_segments"][0]["wav_path"].endswith(".wav")
+            assert result["tts_segments"][1]["start"] == 2.5
             assert result["stage"] == "synthesis"
 
     def test_run_tts_skips_if_tts_segments_exist(self):
@@ -222,46 +223,23 @@ class TestTts:
         result = run_tts(state)
         assert result == {"stage": "synthesis"}
 
-    def test_run_tts_skip_on_failure_continues(self):
-        state = make_initial_state(input_path="/tmp/lecture.mp4")
-        state["subtitles_cn"] = [
-            {"index": 0, "start": 0.0, "end": 1.0, "text": "第一句"},
-            {"index": 1, "start": 1.0, "end": 2.0, "text": "第二句"},
-        ]
-
-        with patch("nodes.tts._generate_tts", side_effect=[False, True]), \
-             patch("nodes.tts._loudnorm", return_value=True), \
-             patch("nodes.tts._build_timeline_sequential"), \
-             patch("os.makedirs"):
-
-            result = run_tts(state)
-
-            assert len(result["tts_segments"]) == 1
-            assert result["tts_segments"][0]["index"] == 1
-            assert len(result["errors"]) == 1
-
-    def test_run_tts_empty_cn_subtitles_returns_error(self):
-        state = make_initial_state(input_path="/tmp/lecture.mp4")
-
-        result = run_tts(state)
-        assert len(result["errors"]) == 1
-
-    def test_run_tts_uses_chinese_voice(self):
+    def test_run_tts_fulltext_failure_returns_error(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
         state["subtitles_cn"] = [
             {"index": 0, "start": 0.0, "end": 1.0, "text": "测试"},
         ]
 
-        with patch("nodes.tts._generate_tts", return_value=True), \
-             patch("nodes.tts._loudnorm", return_value=True), \
-             patch("nodes.tts._build_timeline_sequential"), \
+        with patch("nodes.tts_utils._get_duration", return_value=0), \
+             patch("nodes.tts._generate_fulltext", return_value=True), \
              patch("os.makedirs"):
 
             result = run_tts(state)
+            assert len(result["errors"]) == 1
 
-            assert len(result["tts_segments"]) == 1
-            assert result["tts_segments"][0]["wav_path"].endswith(".wav")
-            assert result["stage"] == "synthesis"
+    def test_run_tts_empty_cn_subtitles_returns_error(self):
+        state = make_initial_state(input_path="/tmp/lecture.mp4")
+        result = run_tts(state)
+        assert len(result["errors"]) == 1
 
 
 class TestSynthesis:

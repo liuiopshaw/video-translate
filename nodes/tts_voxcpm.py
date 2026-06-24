@@ -1,27 +1,25 @@
-"""Node ④-alt: VoxCPM2 TTS via HuggingFace Gradio API.
+"""Node ④-alt: VoxCPM2 TTS via HuggingFace Gradio API (full-text pipeline).
 
-No local GPU/MLX needed. Calls the hosted VoxCPM2 demo space.
-~15s per segment. Free, no rate limit issues like Edge TTS.
+One API call for the entire text → split by character ratio → place on timeline.
+~15-30s total instead of N×15s.
 
 Usage:
     export TTS_ENGINE=voxcpm
+    export VOXCPM_VOICE="一位沉稳专业的男性播报员，声音清晰有力"
 """
 import os
 import subprocess
-import time
 import shutil
-import tempfile
 from state import PipelineState, TSeg, Error
+from nodes.tts_utils import fulltext_tts_pipeline
 
 VOXCPM_SPACE = os.environ.get("VOXCPM_SPACE", "OpenBMB/VoxCPM-Demo")
 VOXCPM_VOICE = os.environ.get("VOXCPM_VOICE", "一位沉稳专业的男性播报员，声音清晰有力")
-LOUDNORM_TARGET = "-16"
 
 _client = None
 
 
 def _get_client():
-    """Lazy-load Gradio client (singleton, ~7s first connection)."""
     global _client
     if _client is None:
         from gradio_client import Client
@@ -31,10 +29,7 @@ def _get_client():
 
 
 def run_tts(state: PipelineState) -> dict:
-    """Generate Chinese TTS using VoxCPM2 Gradio Space API.
-
-    Same interface as Edge TTS node — drop-in replacement.
-    """
+    """Generate Chinese TTS via VoxCPM2 — single API call for entire text."""
     if state.get("tts_segments"):
         return {"stage": "synthesis"}
 
@@ -42,73 +37,25 @@ def run_tts(state: PipelineState) -> dict:
     if not cn_subs:
         return {
             "errors": [Error(
-                stage="tts",
-                message="No Chinese subtitles found. Run translate first.",
+                stage="tts", message="No Chinese subtitles found.",
                 retry_count=0,
             )],
             "stage": "tts",
         }
 
     work_dir = os.path.join(".video-translate", state["video_title"])
-    tts_dir = os.path.join(work_dir, "tts_segments")
-    norm_dir = os.path.join(work_dir, "tts_norm")
-    os.makedirs(tts_dir, exist_ok=True)
-    os.makedirs(norm_dir, exist_ok=True)
 
-    segments = []
-    errors = []
+    segments, errors = fulltext_tts_pipeline(
+        cn_subs, work_dir, _generate_fulltext_voxcpm, label="VoxCPM2"
+    )
 
-    print(f"   🎤 VoxCPM2: {len(cn_subs)} segments to generate")
-
-    for sub in cn_subs:
-        wav_path = os.path.join(tts_dir, f"{sub['index']:04d}.wav")
-        norm_path = os.path.join(norm_dir, f"{sub['index']:04d}.wav")
-
-        if os.path.exists(norm_path) and os.path.getsize(norm_path) >= 500:
-            segments.append(TSeg(
-                index=sub["index"], start=sub["start"], end=sub["end"],
-                wav_path=norm_path,
-            ))
-            continue
-
-        # Primary: VoxCPM2 API
-        ok = _generate_voxcpm(sub["text"], wav_path)
-
-        # Fallback: Edge TTS
-        if not ok:
-            errors.append(Error(
-                stage="tts",
-                message=f"VoxCPM2 failed for seg {sub['index']}, Edge TTS fallback",
-                retry_count=0,
-            ))
-            time.sleep(1.0)
-            from nodes.tts import _generate_tts
-            ok = _generate_tts(sub["text"], wav_path, sub["index"])
-
-        if not ok:
-            continue
-
-        # Normalize
-        if not _loudnorm(wav_path, norm_path):
-            os.replace(wav_path, norm_path)
-
-        segments.append(TSeg(
-            index=sub["index"], start=sub["start"], end=sub["end"],
-            wav_path=norm_path,
-        ))
-
-        if len(segments) % 10 == 0:
-            print(f"   📝 {len(segments)}/{len(cn_subs)}")
+    typed_errors = [
+        Error(stage=e["stage"], message=e["message"], retry_count=0)
+        for e in errors
+    ]
 
     if not segments:
-        return {
-            "errors": [Error(
-                stage="tts",
-                message="All TTS segments failed (VoxCPM2 + Edge TTS)",
-                retry_count=0,
-            )] + errors,
-            "stage": "tts",
-        }
+        return {"errors": typed_errors, "stage": "tts"}
 
     cn_audio = os.path.join(work_dir, "cn_audio.wav")
     from nodes.tts import _build_timeline_sequential
@@ -118,18 +65,16 @@ def run_tts(state: PipelineState) -> dict:
         "tts_segments": segments,
         "cn_audio": cn_audio,
         "stage": "synthesis",
-        "errors": errors,
+        "errors": typed_errors,
     }
 
 
-def _generate_voxcpm(text: str, output: str) -> bool:
-    """Generate TTS via VoxCPM2 Gradio API. Returns True on success.
+def _generate_fulltext_voxcpm(text: str, output: str) -> bool:
+    """Generate full-text audio via VoxCPM2 Gradio API."""
+    client = _get_client()
 
-    Uses VOXCPM_VOICE env var as control_instruction for consistent timbre.
-    """
     for attempt in range(2):
         try:
-            client = _get_client()
             result = client.predict(
                 text_input=text,
                 control_instruction=VOXCPM_VOICE,
@@ -141,29 +86,14 @@ def _generate_voxcpm(text: str, output: str) -> bool:
                 denoise=False,
                 api_name="/generate",
             )
-
             if isinstance(result, str) and os.path.exists(result):
                 shutil.copy(result, output)
                 if os.path.getsize(output) >= 500:
                     return True
-
             if os.path.exists(output):
                 os.remove(output)
-
         except Exception:
             if attempt < 1:
-                time.sleep(2.0)
-
+                import time
+                time.sleep(3.0)
     return False
-
-
-def _loudnorm(input_path: str, output_path: str) -> bool:
-    """Normalize loudness and downsample to 24kHz mono."""
-    result = subprocess.run(
-        ["ffmpeg", "-y", "-i", input_path,
-         "-af", f"loudnorm=I={LOUDNORM_TARGET}:TP=-1.5:LRA=11:linear=true",
-         "-ar", "24000", "-ac", "1",
-         "-c:a", "pcm_s16le", output_path],
-        capture_output=True, text=True, timeout=30,
-    )
-    return result.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) >= 500

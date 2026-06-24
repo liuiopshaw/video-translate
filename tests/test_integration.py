@@ -77,11 +77,13 @@ class TestIntegration:
         state.update(translate(state, llm=mock_llm))
         assert len(state["subtitles_cn"]) == 1
 
-        # Step 4: TTS
-        with patch("subprocess.run") as mock_run, \
-             patch("os.path.exists", return_value=True), \
-             patch("os.makedirs"), \
-             patch("nodes.tts._build_timeline_sequential"):
+        # Step 4: TTS (fulltext pipeline)
+        with patch("nodes.tts._generate_fulltext", return_value=True), \
+             patch("nodes.tts_utils._get_duration", return_value=10.0), \
+             patch("nodes.tts_utils._extract_segment"), \
+             patch("nodes.tts_utils._loudnorm", return_value=True), \
+             patch("nodes.tts._build_timeline_sequential"), \
+             patch("os.makedirs"):
             state.update(run_tts(state))
         assert len(state["tts_segments"]) == 1
 
