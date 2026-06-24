@@ -13,23 +13,32 @@ def fulltext_tts_pipeline(
     """Single-call TTS pipeline: generate full audio, then split per sentence.
 
     Steps:
-      1. Join all sentences into one text block.
-      2. Generate one long audio file (1 API call instead of N).
-      3. Split proportionally based on character counts.
+      1. Clean sentences (strip trailing punct) and join with 。
+      2. Generate one long audio file.
+      3. Split proportionally based on cleaned character counts.
       4. Normalize each segment.
 
     Returns (segments, errors).
     """
     errors = []
 
-    # Step 1: Join all text
-    full_text = "。".join(sub["text"] for sub in cn_subs) + "。"
-    total_chars = sum(len(sub["text"]) for sub in cn_subs)
+    # Step 1: Clean and join text
+    cleaned = []
+    for sub in cn_subs:
+        t = sub["text"].strip().rstrip("，。！？、；：,.!?;:")
+        if t:
+            cleaned.append(t)
+
+    if not cleaned:
+        return [], [{"stage": "tts", "message": "No valid text after cleaning"}]
+
+    full_text = "。".join(cleaned) + "。"
 
     # Step 2: Generate full audio
     full_audio = os.path.join(work_dir, "full_tts.wav")
     if not os.path.exists(full_audio) or os.path.getsize(full_audio) < 500:
-        print(f"   🎤 {label}: generating full audio ({total_chars} chars)...")
+        total = sum(len(s) for s in cleaned)
+        print(f"   🎤 {label}: generating full audio ({total} chars)...")
         if not generate_fn(full_text, full_audio):
             return [], [{"stage": "tts", "message": f"{label} full-text generation failed"}]
 
@@ -38,16 +47,19 @@ def fulltext_tts_pipeline(
     if duration <= 0:
         return [], [{"stage": "tts", "message": f"{label} audio has zero duration"}]
 
-    # Step 4: Split proportionally
+    # Step 4: Split proportionally using cleaned char lengths
     tts_dir = os.path.join(work_dir, "tts_segments")
     norm_dir = os.path.join(work_dir, "tts_norm")
     os.makedirs(tts_dir, exist_ok=True)
     os.makedirs(norm_dir, exist_ok=True)
 
+    cleaned_lens = [len(s) for s in cleaned]
+    total_cleaned = sum(cleaned_lens)
+
     segments = []
     cumulative = 0
 
-    for sub in cn_subs:
+    for i, sub in enumerate(cn_subs):
         norm_path = os.path.join(norm_dir, f"{sub['index']:04d}.wav")
 
         if os.path.exists(norm_path) and os.path.getsize(norm_path) >= 500:
@@ -55,18 +67,16 @@ def fulltext_tts_pipeline(
                 index=sub["index"], start=sub["start"], end=sub["end"],
                 wav_path=norm_path,
             ))
-            cumulative += len(sub["text"])
+            cumulative += cleaned_lens[i] if i < len(cleaned_lens) else len(sub["text"])
             continue
 
-        # Proportional split
-        char_len = len(sub["text"])
-        audio_start = (cumulative / total_chars) * duration if total_chars > 0 else 0
-        audio_end = ((cumulative + char_len) / total_chars) * duration if total_chars > 0 else duration
+        char_len = cleaned_lens[i] if i < len(cleaned_lens) else len(sub["text"])
+        audio_start = (cumulative / total_cleaned) * duration if total_cleaned > 0 else 0
+        audio_end = ((cumulative + char_len) / total_cleaned) * duration if total_cleaned > 0 else duration
 
         raw_path = os.path.join(tts_dir, f"{sub['index']:04d}.wav")
         _extract_segment(full_audio, raw_path, audio_start, audio_end)
 
-        # Normalize
         if not _loudnorm(raw_path, norm_path):
             os.replace(raw_path, norm_path)
 
@@ -93,8 +103,7 @@ def _get_duration(path: str) -> float:
 
 
 def _extract_segment(src: str, dst: str, start: float, end: float) -> None:
-    """Extract an audio segment by time range."""
-    # Add small overlap for smooth transitions
+    """Extract an audio segment by time range with smooth overlap."""
     margin = 0.05
     start = max(0, start - margin)
     subprocess.run(

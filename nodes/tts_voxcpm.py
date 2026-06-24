@@ -14,7 +14,11 @@ from state import PipelineState, TSeg, Error
 from nodes.tts_utils import fulltext_tts_pipeline
 
 VOXCPM_SPACE = os.environ.get("VOXCPM_SPACE", "OpenBMB/VoxCPM-Demo")
-VOXCPM_VOICE = os.environ.get("VOXCPM_VOICE", "一位沉稳专业的男性播报员，声音清晰有力")
+VOXCPM_VOICE = os.environ.get(
+    "VOXCPM_VOICE",
+    "一位沉稳专业的男性播报员，声音清晰有力。"
+    "语速均匀流畅，句间自然停顿，句内连贯无停顿无气口。"
+)
 BATCH_CHARS = int(os.environ.get("VOXCPM_BATCH_CHARS", "800"))
 
 _client = None
