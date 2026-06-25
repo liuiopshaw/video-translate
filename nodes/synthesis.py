@@ -16,12 +16,12 @@ def synthesize_audio(state: PipelineState) -> dict:
     if state.get("cn_audio_mixed"):
         return {"stage": "merge"}
 
-    tts_segments = state.get("tts_segments", [])
-    if not tts_segments:
+    cn_audio = state.get("cn_audio", "")
+    if not cn_audio:
         return {
             "errors": [Error(
                 stage="synthesis",
-                message="No TTS segments found. Run TTS first.",
+                message="No Chinese audio found. Run TTS first.",
                 retry_count=0,
             )],
             "stage": "synthesis",

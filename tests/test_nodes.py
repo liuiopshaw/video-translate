@@ -193,44 +193,37 @@ class TestTranslate:
 
 
 class TestTts:
-    def test_run_tts_generates_segments(self):
+    def test_run_tts_generates_audio(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
         state["subtitles_cn"] = [
             {"index": 0, "start": 0.0, "end": 2.5, "text": "大家好"},
             {"index": 1, "start": 2.5, "end": 5.0, "text": "欢迎来到课程"},
         ]
 
-        with patch("nodes.tts_utils._get_duration", return_value=10.0), \
-             patch("nodes.tts_utils._extract_segment"), \
-             patch("nodes.tts_utils._loudnorm", return_value=True), \
-             patch("nodes.tts._generate_fulltext", return_value=True), \
-             patch("nodes.tts._build_timeline_sequential"), \
+        with patch("nodes.tts._generate_fulltext", return_value=True), \
+             patch("nodes.tts._loudnorm"), \
              patch("os.makedirs"):
 
             result = run_tts(state)
 
-            assert len(result["tts_segments"]) == 2
-            assert result["tts_segments"][0]["index"] == 0
-            assert result["tts_segments"][0]["start"] == 0.0
-            assert result["tts_segments"][1]["start"] == 2.5
+            assert result["cn_audio"] != ""
             assert result["stage"] == "synthesis"
 
-    def test_run_tts_skips_if_tts_segments_exist(self):
+    def test_run_tts_skips_if_cn_audio_exists(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
         state["subtitles_cn"] = [{"index": 0, "start": 0.0, "end": 1.0, "text": "你好"}]
-        state["tts_segments"] = [{"index": 0, "start": 0.0, "end": 1.0, "wav_path": "/tmp/0.wav"}]
+        state["cn_audio"] = "/tmp/existing.wav"
+        with patch("os.path.exists", return_value=True):
+            result = run_tts(state)
+            assert result == {"stage": "synthesis"}
 
-        result = run_tts(state)
-        assert result == {"stage": "synthesis"}
-
-    def test_run_tts_fulltext_failure_returns_error(self):
+    def test_run_tts_generation_failure(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
         state["subtitles_cn"] = [
             {"index": 0, "start": 0.0, "end": 1.0, "text": "测试"},
         ]
 
-        with patch("nodes.tts_utils._get_duration", return_value=0), \
-             patch("nodes.tts._generate_fulltext", return_value=True), \
+        with patch("nodes.tts._generate_fulltext", return_value=False), \
              patch("os.makedirs"):
 
             result = run_tts(state)
@@ -246,9 +239,6 @@ class TestSynthesis:
     def test_synthesize_mixes_bgm_with_tts(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
         state["audio_wav"] = "/tmp/audio.wav"
-        state["tts_segments"] = [
-            {"index": 0, "start": 0.0, "end": 2.0, "wav_path": "/tmp/tts/0000.wav"},
-        ]
         state["cn_audio"] = "/tmp/cn_audio.wav"
 
         with patch("subprocess.run") as mock_run:
@@ -261,9 +251,6 @@ class TestSynthesis:
     def test_synthesize_no_bgm_flag_skips_separation(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4", keep_bgm=False)
         state["audio_wav"] = "/tmp/audio.wav"
-        state["tts_segments"] = [
-            {"index": 0, "start": 0.0, "end": 2.0, "wav_path": "/tmp/tts/0000.wav"},
-        ]
         state["cn_audio"] = "/tmp/cn_audio.wav"
 
         result = synthesize_audio(state)
@@ -274,9 +261,6 @@ class TestSynthesis:
     def test_synthesize_uvr_failure_degrades_gracefully(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
         state["audio_wav"] = "/tmp/audio.wav"
-        state["tts_segments"] = [
-            {"index": 0, "start": 0.0, "end": 2.0, "wav_path": "/tmp/tts/0000.wav"},
-        ]
         state["cn_audio"] = "/tmp/cn_audio.wav"
 
         with patch("subprocess.run") as mock_run:
@@ -291,13 +275,13 @@ class TestSynthesis:
 
     def test_synthesize_skips_if_already_done(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
-        state["tts_segments"] = [{"index": 0, "start": 0.0, "end": 1.0, "wav_path": "/tmp/0.wav"}]
+        state["cn_audio"] = "/tmp/cn.wav"
         state["cn_audio_mixed"] = "/tmp/already_mixed.wav"
 
         result = synthesize_audio(state)
         assert result == {"stage": "merge"}
 
-    def test_synthesize_no_tts_segments_returns_error(self):
+    def test_synthesize_no_cn_audio_returns_error(self):
         state = make_initial_state(input_path="/tmp/lecture.mp4")
 
         result = synthesize_audio(state)

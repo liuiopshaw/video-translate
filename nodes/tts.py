@@ -1,9 +1,12 @@
-"""Node ④: Generate Chinese TTS audio using Edge TTS (full-text pipeline)."""
+"""Node ④: Generate Chinese TTS audio using Edge TTS (full-text, no splitting).
+
+Generates one continuous audio file — no per-sentence splitting, no timeline gaps.
+The full audio is used directly; merge step handles length mismatch with -shortest.
+"""
 import os
 import subprocess
 import time
-from state import PipelineState, TSeg, Error
-from nodes.tts_utils import fulltext_tts_pipeline
+from state import PipelineState, Error
 
 VOICE = os.environ.get("TTS_VOICE", "zh-CN-YunxiNeural")
 RATE = os.environ.get("TTS_RATE", "+15%")
@@ -11,12 +14,12 @@ MIN_FILE_SIZE = 500
 
 
 def run_tts(state: PipelineState) -> dict:
-    """Generate Chinese voice audio — single API call for entire text.
+    """Generate one continuous Chinese voice track from the full translated text.
 
     Reads: state["subtitles_cn"], state["video_title"]
-    Writes: state["tts_segments"], state["cn_audio"], state["stage"], state["errors"]
+    Writes: state["cn_audio"], state["stage"], state["errors"]
     """
-    if state.get("tts_segments"):
+    if state.get("cn_audio") and os.path.exists(state["cn_audio"]):
         return {"stage": "synthesis"}
 
     cn_subs = state.get("subtitles_cn", [])
@@ -30,31 +33,37 @@ def run_tts(state: PipelineState) -> dict:
         }
 
     work_dir = os.path.join(".video-translate", state["video_title"])
+    os.makedirs(work_dir, exist_ok=True)
 
-    segments, errors = fulltext_tts_pipeline(
-        cn_subs, work_dir, _generate_fulltext, label="Edge TTS"
-    )
+    # Build clean full text
+    cleaned = []
+    for sub in cn_subs:
+        t = sub["text"].strip().rstrip("，。！？、；：,.!?;:")
+        if t:
+            cleaned.append(t)
 
-    # Convert dict errors to Error TypedDicts
-    typed_errors = [
-        Error(stage=e["stage"], message=e["message"], retry_count=0)
-        for e in errors
-    ]
+    full_text = "。".join(cleaned) + "。"
+    total = sum(len(s) for s in cleaned)
+    print(f"   🎤 Edge TTS: generating full audio ({total} chars)...")
 
-    if not segments:
+    cn_audio = os.path.join(work_dir, "cn_audio.wav")
+    if not _generate_fulltext(full_text, cn_audio):
         return {
-            "errors": typed_errors,
+            "errors": [Error(
+                stage="tts", message="Edge TTS full-text generation failed.",
+                retry_count=0,
+            )],
             "stage": "tts",
         }
 
-    cn_audio = os.path.join(work_dir, "cn_audio.wav")
-    _build_timeline_sequential(segments, cn_audio)
+    # Normalize loudness
+    norm_audio = os.path.join(work_dir, "cn_audio_norm.wav")
+    _loudnorm(cn_audio, norm_audio)
 
     return {
-        "tts_segments": segments,
-        "cn_audio": cn_audio,
+        "cn_audio": norm_audio,
         "stage": "synthesis",
-        "errors": typed_errors,
+        "errors": [],
     }
 
 
@@ -94,33 +103,15 @@ def _generate_fulltext(text: str, output: str) -> bool:
     return False
 
 
-def _build_timeline_sequential(segments: list[dict], output_path: str) -> None:
-    """Place segments on timeline via sequential 2-input amix."""
-    sorted_segs = sorted(segments, key=lambda s: s["start"])
-    total_duration = max(s["end"] for s in sorted_segs) + 1
-
+def _loudnorm(input_path: str, output_path: str) -> None:
+    """Normalize loudness and downsample to 24kHz mono."""
     subprocess.run(
-        ["ffmpeg", "-y", "-f", "lavfi", "-i",
-         f"anullsrc=r=24000:cl=mono:d={total_duration}",
+        ["ffmpeg", "-y", "-i", input_path,
+         "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:linear=true",
+         "-ar", "24000", "-ac", "1",
          "-c:a", "pcm_s16le", output_path],
-        capture_output=True, text=True,
+        capture_output=True, text=True, timeout=60,
     )
-
-    for seg in sorted_segs:
-        delay_ms = int(seg["start"] * 1000)
-        tmp = output_path + ".tmp.wav"
-        result = subprocess.run(
-            ["ffmpeg", "-y", "-i", output_path, "-i", seg["wav_path"],
-             "-filter_complex",
-             f"[0:a]volume=1[base];"
-             f"[1:a]adelay={delay_ms}|{delay_ms}[spk];"
-             f"[base][spk]amix=inputs=2:duration=longest:dropout_transition=0,volume=2",
-             "-c:a", "pcm_s16le", tmp],
-            capture_output=True, text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"Mix failed at seg {seg['index']}: {result.stderr[:200]}")
-        os.replace(tmp, output_path)
 
 
 def _safe_remove(path: str) -> None:
